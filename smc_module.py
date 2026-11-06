@@ -83,9 +83,14 @@ def analyze_smc(candles, lookback=30):
         reason = f"{sweep.title()} liquidity sweep detected, but no confirming BOS"
     elif bos != sweep:
         reason = f"Liquidity sweep direction ({sweep}) conflicts with BOS ({bos})"
+    elif fvg != sweep:
+        reason = (
+            f"{sweep.title()} sweep and BOS confirmed, but no matching "
+            f"FVG (detected: {fvg or 'none'})"
+        )
     else:
         direction = sweep
-        reason = f"{sweep.title()} liquidity sweep followed by structure break"
+        reason = f"{sweep.title()} liquidity sweep, BOS and matching FVG confirmed"
 
     return {
         "direction": direction,
