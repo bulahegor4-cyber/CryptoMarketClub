@@ -1,0 +1,21 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime state and private trade journal
+risk_trades.json
+sent_signals.json
+seen_news.txt
+listing_scanner_state.json
+
+# Logs and generated charts
+*.log
+signal_*.png
+cryptomarketclub_heatmap.png
