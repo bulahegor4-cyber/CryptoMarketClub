@@ -31,6 +31,8 @@ def main():
         raise RuntimeError(payload)
 
     found = 0
+    discovered = {}
+    allowed_labels = {"signals", "news", "altcoins", "macro", "markets", "gold_forex", "psychology", "discussion"}
     for update in payload.get("result", []):
         message = update.get("message") or update.get("edited_message")
         if not message:
@@ -47,7 +49,25 @@ def main():
         print(
             f"{label}: chat_id={chat.get('id')} | message_thread_id={thread_id}"
         )
+        if label.lower() in allowed_labels:
+            discovered[label.lower()] = int(thread_id)
+        else:
+            print(f"Label '{label}' ignored. Allowed labels: {', '.join(sorted(allowed_labels))}")
         found += 1
+
+    if discovered:
+        lines = ENV_PATH.read_text(encoding="utf-8-sig").splitlines()
+        for label, thread_id in discovered.items():
+            key = f"TELEGRAM_TOPIC_{label.upper()}_ID"
+            replacement = f"{key}={thread_id}"
+            for index, line in enumerate(lines):
+                if line.strip().startswith(key + "="):
+                    lines[index] = replacement
+                    break
+            else:
+                lines.append(replacement)
+        ENV_PATH.write_text("\\n".join(lines).rstrip() + "\\n", encoding="utf-8")
+        print("Saved topic IDs to .env: " + ", ".join(sorted(discovered)))
 
     if not found:
         print("No /topicid updates found.")
