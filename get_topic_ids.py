@@ -5,7 +5,7 @@ Usage:
 2. In each forum topic, send /topicid to the bot.
 3. Run: py get_topic_ids.py
 
-This script only reads pending updates; it does not send messages or trade.
+This script reads pending updates and saves discovered topic IDs to .env; it does not send messages or trade.
 """
 from pathlib import Path
 import requests
@@ -66,7 +66,7 @@ def main():
                     break
             else:
                 lines.append(replacement)
-        ENV_PATH.write_text("\\n".join(lines).rstrip() + "\\n", encoding="utf-8")
+        ENV_PATH.write_text(chr(10).join(lines).rstrip() + chr(10), encoding="utf-8")
         print("Saved topic IDs to .env: " + ", ".join(sorted(discovered)))
 
     if not found:
