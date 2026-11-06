@@ -1009,13 +1009,17 @@ def main():
 
         if now - last_scalp >= SCALP_INTERVAL_SECONDS:
             try:
-               scan_modes(
-    scalp_symbols,
-    [("SCALPING", ["30m"])],
-    sent_signals
-)
+                scan_modes(scalp_symbols, [("SCALPING", ["30m"])], sent_signals)
             except Exception as error:
-                print("Ä‚â€žĂ‚ÂĂ„Ä…Ă„ÄľĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â±Ä‚â€žĂ‚ÂĂ„Ä…ÄąĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â° Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂĂ„Ä…Ă˘â‚¬ĹˇÄ‚â€žĂ‚ÂÄ‚â€žĂ„Äľ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂĂ„Ä…ÄąĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°:", error)
+                print("Scalping scan error:", error)
+            finally:
+                last_scalp = time.time()
+
+        if time.time() - last_medium >= MEDIUM_INTERVAL_SECONDS:
+            try:
+                scan_modes(symbols, [("MEDIUM-TERM", ["15m"])], sent_signals)
+            except Exception as error:
+                print("Medium-term scan error:", error)
             last_medium = time.time()
 
         if time.time() - last_long_term >= LONG_INTERVAL_SECONDS:
