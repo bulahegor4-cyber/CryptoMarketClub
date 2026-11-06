@@ -3,7 +3,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 TRADES_FILE = Path(__file__).resolve().parent / "risk_trades.json"
-BALANCE_USDT = 100.0
+BALANCE_USDT = 1000.0
 MAX_DAILY_LOSS_PCT = 3.0
 
 
