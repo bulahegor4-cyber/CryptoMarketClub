@@ -79,7 +79,45 @@ def get_token():
     raise ValueError("Ä‚â€žĂ‚ÂÄ‚â€ąĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂĂ„Ä…ÄąĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„ Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€žĂ˘â‚¬Â¦Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„ Ä‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬Ĺź .env")
 
 
-def send_telegram(message, thread_id=None):
+def get_topic_id(topic):
+    """Read a Telegram forum topic ID from .env; return None until configured."""
+    key = f"TELEGRAM_TOPIC_{topic.upper()}_ID"
+    try:
+        with open(ENV_PATH, "r", encoding="utf-8-sig") as env_file:
+            for line in env_file:
+                line = line.strip()
+                if line.startswith(key + "="):
+                    value = line.split("=", 1)[1].strip()
+                    return int(value) if value else None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def news_topic(article):
+    """Route macro/geopolitical and token-specific stories to their own topics."""
+    text = (article.get("title", "") + " " + article.get("description", "")).lower()
+    macro_terms = (
+        "federal reserve", "the fed", "fomc", "interest rate", "rate decision",
+        "inflation", "cpi", "pce", "nonfarm", "unemployment", "treasury",
+        "iran", "israel", "middle east", "white house", "sanction", "sanctions",
+        "geopolit", "military", "war", "ceasefire", "oil price",
+    )
+    token_terms = (
+        "listing", "listed", "delisting", "airdrop", "token unlock",
+        "token launch", "new token", "altcoin", "memecoin", "memecoin",
+        "pump.fun", "solana token",
+    )
+    if any(term in text for term in macro_terms):
+        return "macro"
+    if any(term in text for term in token_terms):
+        return "altcoins"
+    return "news"
+
+
+def send_telegram(message, thread_id=None, topic=None):
+    if thread_id is None and topic:
+        thread_id = get_topic_id(topic)
     token = get_token()
     payload = {
         "chat_id": CHAT_ID,
@@ -526,7 +564,7 @@ def scan_news(seen):
             )
 
             try:
-                send_telegram(message[:4000])
+                send_telegram(message[:4000], topic=news_topic(article))
                 seen.add(article["id"])
                 new_count += 1
                 print("\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430 \u043d\u043e\u0432\u043e\u0441\u0442\u044c:", article["title"])
@@ -648,9 +686,8 @@ def scan_modes(symbols, modes, sent_signals):
         return
     sent_count = 0
     for mode_name, timeframes in modes:
-        # The destination is a regular Telegram channel, so forum topic IDs
-        # from the previous supergroup must not be sent.
-        topic_id = None
+        # Signals are routed to the configured Telegram forum topic.
+        topic_id = get_topic_id("signals")
         print(f"\n--- {mode_name}: {', '.join(timeframes)} ---")
         for symbol in symbols:
             for timeframe in timeframes:
@@ -1008,6 +1045,7 @@ def main():
                     "CryptoMarketClub | Market Heatmap\n"
                     "Crypto market overview for selected USDT pairs.",
                     heatmap_path,
+                    thread_id=get_topic_id("signals"),
                 )
                 print("Market heatmap sent to Telegram.")
             except Exception as error:
