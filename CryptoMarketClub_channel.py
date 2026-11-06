@@ -118,6 +118,8 @@ def news_topic(article):
 def send_telegram(message, thread_id=None, topic=None):
     if thread_id is None and topic:
         thread_id = get_topic_id(topic)
+        if thread_id is None and topic != "news":
+            thread_id = get_topic_id("news")
     token = get_token()
     payload = {
         "chat_id": CHAT_ID,
