@@ -2,7 +2,7 @@
 
 Usage:
 1. Add TELEGRAM_BOT_TOKEN=... to the project's .env file.
-2. In each forum topic, send /topicid to the bot.
+2. In each forum topic, send /topicid@CryptoMarketClubSignalsBot LABEL (for example: /topicid@CryptoMarketClubSignalsBot signals).
 3. Run: py get_topic_ids.py
 
 This script reads pending updates and saves discovered topic IDs to .env; it does not send messages or trade.
@@ -72,7 +72,7 @@ def main():
     if not found:
         print("No /topicid updates found.")
         print("Send /topicid to the bot inside each required forum topic, then run this script again.")
-        print("If Telegram reports a webhook conflict, remove the webhook only if this bot is not using one elsewhere.")
+        print("If Telegram reports a webhook conflict, do not remove the webhook blindly; send the error for review.")
 
 
 if __name__ == "__main__":
