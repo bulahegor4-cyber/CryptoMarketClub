@@ -24,8 +24,9 @@ SENT_SIGNALS_PATH = os.path.join(SCRIPT_DIR, "sent_signals.json")
 
 # Risk management settings
 RISK_BALANCE_USDT = 1000.0
-RISK_PER_TRADE_PCT = 10.0
+RISK_PER_TRADE_PCT = 10.0  # High-risk test setting: 100 USDT risk on a 1000 USDT balance.
 MAX_DAILY_LOSS_PCT = 3.0
+MIN_VOLUME_RATIO = 1.5
 ESTIMATED_ROUND_TRIP_FEE_PCT = 0.10
 
 
@@ -265,6 +266,9 @@ def analyze(symbol, timeframe, mode_name):
         direction = None
 
     print(f"{mode_name} | {symbol} {timeframe}: price={price:.6g}, EMA20={ema20:.6g}, EMA50={ema50:.6g}, RSI={rsi:.1f}, MACD_hist={macd_hist:.6g}, BB=({bb_lower:.6g}-{bb_upper:.6g}), Volume_ratio={volume_ratio:.2f}")
+    if volume_ratio < MIN_VOLUME_RATIO:
+        print(f"Volume filter rejected {symbol} {timeframe}: {volume_ratio:.2f} < {MIN_VOLUME_RATIO:.2f}")
+        return None
     if not direction or atr <= 0:
         return None
 
@@ -563,7 +567,7 @@ def get_available_symbols():
     # Requested coins are prioritized when available and liquid enough.
     priority = [
         "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT",
-        "DOGE-USDT", "ADA-USDT", "LINK-USDT", "AVAX-USDT", "LTC-USDT",
+        "DOGE-USDT", "ADA-USDT", "LINK-USDT", "AVAX-USDT", "LTC-USDT", "PUMP-USDT",
         "DOT-USDT", "TRX-USDT", "BCH-USDT", "UNI-USDT", "APT-USDT",
         "ARB-USDT", "OP-USDT", "NEAR-USDT", "SUI-USDT", "FIL-USDT",
         "ZEC-USDT",
@@ -935,6 +939,8 @@ def main():
     sent_signals = load_sent_signals()
     symbols = get_available_symbols()
     scalp_symbols = symbols[:15]
+    if "PUMP-USDT" in symbols and "PUMP-USDT" not in scalp_symbols:
+        scalp_symbols = symbols[:14] + ["PUMP-USDT"]
     now = time.time()
     last_scalp = 0
     last_medium = 0
@@ -957,6 +963,8 @@ def main():
             try:
                 symbols = get_available_symbols()
                 scalp_symbols = symbols[:15]
+                if "PUMP-USDT" in symbols and "PUMP-USDT" not in scalp_symbols:
+                    scalp_symbols = symbols[:14] + ["PUMP-USDT"]
             except Exception as error:
                 print("Ä‚â€žĂ‚ÂĂ„Ä…Ă„â€žÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â»Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…ÄąË‡ Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â±Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ă„Ä…Ă‚ÂĂ„Ä…ÄąË‡ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂĂ„Ä…Ă„ËťÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂĂ„Ä…ÄąĹź Ä‚â€žĂ‚ÂĂ„Ä…ÄąĹźÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂĂ„Ä…ÄąĹźĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬Ĺź:", error)
 
