@@ -1,0 +1,548 @@
+import requests
+import time
+import os
+import hashlib
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
+
+BASE_URL = "https://open-api.bingx.com"
+CHAT_ID = "669952449"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.join(SCRIPT_DIR, ".env")
+SEEN_NEWS_PATH = os.path.join(SCRIPT_DIR, "seen_news.txt")
+# Schedule: scalp every minute, medium-term every 15 minutes, long-term hourly.
+SCALP_INTERVAL_SECONDS = 60
+MEDIUM_INTERVAL_SECONDS = 15 * 60
+LONG_INTERVAL_SECONDS = 60 * 60
+NEWS_INTERVAL_SECONDS = 15 * 60
+SENT_SIGNALS_PATH = os.path.join(SCRIPT_DIR, "sent_signals.json")
+
+NEWS_FEEDS = [
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml"),
+    ("Cointelegraph", "https://cointelegraph.com/rss"),
+    ("The Block", "https://www.theblock.co/rss.xml"),
+    ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
+]
+
+# Keyword-based first-pass classification. This is not an AI model and can be wrong.
+HIGH_IMPACT_TERMS = [
+    "sec", "lawsuit", "court", "ban", "banned", "approval", "approved",
+    "etf", "hack", "hacked", "exploit", "breach", "bankruptcy", "insolvency",
+    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
+    "inflation", "cpi", "jobs report", "recession", "sanction", "war",
+    "liquidation", "liquidations", "outage", "stablecoin", "depeg",
+    "default", "investigation", "settlement", "bitcoin reserve",
+]
+POSITIVE_TERMS = [
+    "approved", "approval", "inflows", "adoption", "partnership", "launch",
+    "record high", "surge", "rally", "rate cut", "bullish", "buy",
+    "accumulation", "integration", "wins", "settlement reached",
+]
+NEGATIVE_TERMS = [
+    "hack", "hacked", "exploit", "breach", "lawsuit", "ban", "banned",
+    "outflows", "crash", "plunge", "sell-off", "bearish", "fraud",
+    "bankruptcy", "insolvency", "depeg", "arrested", "charges", "rate hike",
+]
+COIN_TERMS = {
+    "BTC": ["bitcoin", "btc"],
+    "ETH": ["ethereum", "ether", "eth"],
+    "SOL": ["solana", "sol"],
+    "BNB": ["bnb", "binance"],
+    "XRP": ["xrp", "ripple"],
+    "DOGE": ["dogecoin", "doge"],
+    "ADA": ["cardano", "ada"],
+    "LINK": ["chainlink", "link"],
+    "AVAX": ["avalanche", "avax"],
+    "PUMP": ["pump.fun", "pump token", "pump crypto"],
+    "LTC": ["litecoin", "ltc"],
+}
+
+
+def get_token():
+    with open(ENV_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("TELEGRAM_BOT_TOKEN="):
+                return line.strip().split("=", 1)[1]
+    raise ValueError("Токен не найден в .env")
+
+
+def send_telegram(message):
+    token = get_token()
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={"chat_id": CHAT_ID, "text": message, "disable_web_page_preview": True},
+        timeout=20,
+    )
+    response.raise_for_status()
+    if not response.json().get("ok"):
+        raise RuntimeError("Telegram не принял сообщение")
+
+
+def ema(values, period):
+    alpha = 2 / (period + 1)
+    result = values[0]
+    for value in values[1:]:
+        result = alpha * value + (1 - alpha) * result
+    return result
+
+
+def analyze(symbol, timeframe, mode_name):
+    """Create an educational technical signal from the last closed candle."""
+    response = requests.get(
+        f"{BASE_URL}/openApi/swap/v3/quote/klines",
+        params={"symbol": symbol, "interval": timeframe, "limit": 120},
+        timeout=20,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    if data.get("code") != 0:
+        print(f"{symbol} {timeframe}: данные недоступны")
+        return None
+
+    candles = sorted(data.get("data", []), key=lambda c: int(c["time"]))
+    if len(candles) > 1:
+         candles = candles[:-1]  # Не анализируем формирующуюся свечу.
+    if len(candles) < 60:
+        print(f"{symbol} {timeframe}: недостаточно свечей")
+        return None
+
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c["high"]) for c in candles]
+    lows = [float(c["low"]) for c in candles]
+    ema20 = ema(closes[-60:], 20)
+    ema50 = ema(closes[-60:], 50)
+
+    changes = [closes[i] - closes[i - 1] for i in range(len(closes) - 14, len(closes))]
+    gains = [max(change, 0) for change in changes]
+    losses = [max(-change, 0) for change in changes]
+    avg_gain = sum(gains) / 14
+    avg_loss = sum(losses) / 14
+    if avg_loss == 0:
+        rsi = 100 if avg_gain > 0 else 50
+    else:
+        rsi = 100 - 100 / (1 + avg_gain / avg_loss)
+
+    true_ranges = []
+    for i in range(len(candles) - 14, len(candles)):
+        previous_close = closes[i - 1]
+        true_ranges.append(max(highs[i] - lows[i], abs(highs[i] - previous_close), abs(lows[i] - previous_close)))
+    atr = sum(true_ranges) / len(true_ranges)
+    price = closes[-1]
+    candle_time = str(candles[-1].get("time", "unknown"))
+
+    # 3 подтверждения: тренд, RSI и движение последних закрытых свечей
+    bullish_trend = ema20 > ema50
+    bearish_trend = ema20 < ema50
+
+    bullish_rsi = 50 < rsi < 65
+    bearish_rsi = 35 < rsi < 50
+
+    bullish_candles = closes[-1] > closes[-2] > closes[-3]
+    bearish_candles = closes[-1] < closes[-2] < closes[-3]
+
+    if bullish_trend and bullish_rsi and bullish_candles:
+        direction = "LONG"
+        rationale = "Подтверждены тренд, RSI и движение последних свечей"
+    elif bearish_trend and bearish_rsi and bearish_candles:
+        direction = "SHORT"
+        rationale = "Подтверждены тренд, RSI и движение последних свечей"
+    else:
+        direction = None
+        rationale = "Три подтверждения не получены — сигнал пропущен"
+
+    print(f"{mode_name} | {symbol} {timeframe}: цена={price:.6g}, EMA20={ema20:.6g}, EMA50={ema50:.6g}, RSI={rsi:.1f}, направление={direction or 'нет сигнала'}")
+    if not direction or atr <= 0:
+        return None
+
+    # Indicative ATR levels only; no exchange orders are placed.
+    sl_mult, tp_mult = (1.2, 1.8) if mode_name == "СКАЛЬПИНГ" else ((1.5, 2.5) if mode_name == "СРЕДНЕСРОЧНЫЙ" else (2.0, 3.5))
+    if direction == "LONG":
+        stop_loss, take_profit = price - sl_mult * atr, price + tp_mult * atr
+    else:
+        stop_loss, take_profit = price + sl_mult * atr, price - tp_mult * atr
+
+    signal_id = f"{symbol}|{timeframe}|{candle_time}|{direction}"
+    message = (
+        f"📊 {mode_name}: ПРЕДВАРИТЕЛЬНЫЙ СИГНАЛ {direction}\n\n"
+        f"Пара: {symbol}\nТаймфрейм: {timeframe}\n"
+        f"Цена закрытия: {price:.8g}\nStop-Loss (ориентир): {stop_loss:.8g}\n"
+        f"Take-Profit (ориентир): {take_profit:.8g}\n"
+        f"EMA20: {ema20:.8g}\nEMA50: {ema50:.8g}\nRSI: {rsi:.1f}\nATR(14): {atr:.8g}\n"
+        f"Обоснование: {rationale}\n\n"
+        "⚠️ Только аналитический сигнал, не финансовая рекомендация. SL/TP — расчётные уровни, не биржевые ордера. Учитывай комиссию, проскальзывание и риск потери средств."
+    )
+    return {"id": signal_id, "message": message, "symbol": symbol, "timeframe": timeframe, "candles": candles, "ema20": ema20, "ema50": ema50, "entry": price, "stop_loss": stop_loss, "take_profit": take_profit, "direction": direction}
+
+
+def load_sent_signals():
+    try:
+        import json
+        with open(SENT_SIGNALS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return set(data if isinstance(data, list) else [])
+    except (FileNotFoundError, ValueError, OSError):
+        return set()
+
+
+def save_sent_signals(sent):
+    import json
+    # Bound the file size; the most recently inserted IDs are kept.
+    with open(SENT_SIGNALS_PATH, "w", encoding="utf-8") as f:
+        json.dump(list(sent)[-5000:], f, ensure_ascii=False, indent=2)
+
+
+def load_seen_news():
+    try:
+        with open(SEEN_NEWS_PATH, "r", encoding="utf-8") as f:
+            return set(line.strip() for line in f if line.strip())
+    except FileNotFoundError:
+        return set()
+
+
+def save_seen_news(seen):
+    # Keep only the latest 1000 IDs so the file does not grow indefinitely.
+    items = list(seen)[-1000:]
+    with open(SEEN_NEWS_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(items))
+
+
+def get_text(element, tag):
+    child = element.find(tag)
+    if child is None:
+        # Support Atom feeds with namespaces.
+        child = element.find("{http://www.w3.org/2005/Atom}" + tag)
+    if child is None or child.text is None:
+        return ""
+    return child.text.strip()
+
+
+def parse_feed(source, url):
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "CryptoMarketClubNewsBot/1.0"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+    except Exception as error:
+        print(f"Новости ({source}): не удалось загрузить ленту — {error}")
+        return []
+
+    items = root.findall(".//item")
+    if not items:
+        items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+
+    articles = []
+    for item in items[:20]:
+        title = get_text(item, "title")
+        description = get_text(item, "description")
+        if not description:
+            description = get_text(item, "summary")
+        link = get_text(item, "link")
+        if not link:
+            link_element = item.find("{http://www.w3.org/2005/Atom}link")
+            if link_element is not None:
+                link = link_element.attrib.get("href", "")
+        pub_date = get_text(item, "pubDate") or get_text(item, "published")
+        guid = get_text(item, "guid") or get_text(item, "id") or link or title
+        if not title:
+            continue
+        articles.append({
+            "source": source,
+            "title": title,
+            "description": description,
+            "link": link,
+            "date": pub_date,
+            "id": hashlib.sha256((source + "|" + guid).encode("utf-8")).hexdigest(),
+        })
+    return articles
+
+
+def classify_news(article):
+    text = (article["title"] + " " + article["description"]).lower()
+    matched_impact = [term for term in HIGH_IMPACT_TERMS if term in text]
+    if not matched_impact:
+        return None
+
+    positive = sum(1 for term in POSITIVE_TERMS if term in text)
+    negative = sum(1 for term in NEGATIVE_TERMS if term in text)
+
+    if positive > negative:
+        sentiment = "Предварительно позитивная"
+        effect = "Возможная поддержка цены"
+    elif negative > positive:
+        sentiment = "Предварительно негативная"
+        effect = "Возможное давление на цену"
+    else:
+        sentiment = "Неоднозначная / требует проверки"
+        effect = "Направление реакции неясно"
+
+    text_upper = text
+    affected = []
+    for ticker, terms in COIN_TERMS.items():
+        if any(term in text_upper for term in terms):
+            affected.append(ticker)
+    if not affected:
+        affected = ["BTC", "ETH", "рынок в целом"]
+
+    # Headline-based urgency estimate, not a verified measure of market impact.
+    if len(matched_impact) >= 2 or any(
+        term in text for term in ["hack", "hacked", "exploit", "fed", "interest rate", "etf", "ban"]
+    ):
+        impact = "ВЫСОКАЯ (предварительно)"
+    else:
+        impact = "СРЕДНЯЯ (предварительно)"
+
+    return {
+        "sentiment": sentiment,
+        "effect": effect,
+        "affected": affected,
+        "impact": impact,
+    }
+
+
+def scan_news(seen):
+    print("Проверяем новостные ленты...")
+    new_count = 0
+
+    for source, url in NEWS_FEEDS:
+        for article in parse_feed(source, url):
+            if article["id"] in seen:
+                continue
+
+            # Mark every fetched item as seen, including non-impact items,
+            # to avoid repeatedly reconsidering old headlines on each scan.
+            seen.add(article["id"])
+            analysis = classify_news(article)
+            if not analysis:
+                continue
+
+            description = article["description"].replace("\n", " ").strip()
+            if len(description) > 350:
+                description = description[:347] + "..."
+            date_text = article["date"] or "Время публикации не указано"
+            message = (
+                f"📰 НОВОСТЬ, ВОЗМОЖНО ВЛИЯЮЩАЯ НА КРИПТОРЫНОК\n\n"
+                f"Источник: {article['source']}\n"
+                f"Заголовок: {article['title']}\n"
+                f"Время: {date_text}\n"
+                f"Предварительная важность: {analysis['impact']}\n"
+                f"Тональность по ключевым словам: {analysis['sentiment']}\n"
+                f"Возможный эффект: {analysis['effect']}\n"
+                f"Активы/рынок: {', '.join(analysis['affected'])}\n"
+            )
+            if description:
+                message += f"\nКратко: {description}\n"
+            if article["link"]:
+                message += f"\nИсточник: {article['link']}"
+            message += (
+                "\n\n⚠️ Автоматическая оценка только по заголовку/краткому описанию. "
+                "Проверь первоисточник: реакция цены может отличаться."
+            )
+
+            try:
+                send_telegram(message[:4000])
+                new_count += 1
+                print(f"Новость отправлена: {article['title']}")
+            except Exception as error:
+                print(f"Ошибка отправки новости в Telegram: {error}")
+
+    save_seen_news(seen)
+    print(f"Новостной скан завершён. Отправлено важных новостей: {new_count}")
+
+
+def get_available_symbols():
+    print("Загружаем список контрактов BingX...")
+    response = requests.get(f"{BASE_URL}/openApi/swap/v2/quote/contracts", timeout=20)
+    response.raise_for_status()
+    result = response.json()
+    if result.get("code") != 0:
+        raise RuntimeError(f"Не удалось получить контракты: {result}")
+    symbols = []
+    for item in result.get("data", []):
+        symbol = item.get("symbol", "")
+        if symbol.endswith("-USDT") and symbol.count("-") == 1 and symbol[:-5].isalnum() and item.get("status") in (1, "1", "TRADING", None):
+            symbols.append(symbol)
+    preferred = [
+        "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT",
+        "DOGE-USDT", "ADA-USDT", "LINK-USDT", "AVAX-USDT", "LTC-USDT", "PUMP-USDT",
+    ]
+    selected = [symbol for symbol in preferred if symbol in symbols]
+    if not selected:
+        raise RuntimeError("Не найдено ни одной приоритетной торговой пары.")
+    print("Монеты для анализа:", ", ".join(selected))
+    return selected
+
+
+def scan_modes(symbols, modes, sent_signals):
+    sent_count = 0
+    for mode_name, timeframes in modes:
+        print(f"\n--- {mode_name}: {', '.join(timeframes)} ---")
+        for symbol in symbols:
+            for timeframe in timeframes:
+                try:
+                    signal = analyze(symbol, timeframe, mode_name)
+                    if signal and signal["id"] not in sent_signals:
+                        chart_path = None
+                        try:
+                            chart_path = create_signal_chart(
+                                signal["symbol"], signal["timeframe"],
+                                signal["candles"], signal["ema20"], signal["ema50"],
+                                signal["entry"], signal["stop_loss"], signal["take_profit"],
+                                signal["direction"]
+                            )
+                            send_telegram_photo(signal["message"], chart_path)
+                        except Exception as chart_error:
+                            print(f"Ошибка графика: {chart_error}. Отправляем текст.")
+                            send_telegram(signal["message"])
+                        finally:
+                            if chart_path:
+                                import os
+                                if os.path.exists(chart_path):
+                                    os.remove(chart_path)
+                        sent_signals.add(signal["id"])
+                        sent_count += 1
+                        print(f"ĐˇĐ¸ĐłĐ˝Đ°Đ» ĐľŃ‚ĐżŃ€Đ°Đ˛Đ»ĐµĐ˝: {symbol} {timeframe} {mode_name}")
+                except Exception as error:
+                    print(f"{symbol} {timeframe}: ĐľŃĐ¸Đ±ĐşĐ° Đ°Đ˝Đ°Đ»Đ¸Đ·Đ° â€” {error}")
+                time.sleep(0.2)
+    if sent_count == 0:
+        print("ĐťĐľĐ˛Ń‹Ń… ŃĐ¸ĐłĐ˝Đ°Đ»ĐľĐ˛ Đ˛ ŃŤŃ‚Đ¸Ń… Ń€ĐµĐ¶Đ¸ĐĽĐ°Ń… Đ˝ĐµŃ‚.")
+    save_sent_signals(sent_signals)
+
+
+def create_signal_chart(symbol, timeframe, candles, ema20, ema50, entry, stop_loss, take_profit, direction):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import os
+    import tempfile
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c["high"]) for c in candles]
+    lows = [float(c["low"]) for c in candles]
+    opens = [float(c["open"]) for c in candles]
+    x = list(range(len(candles)))
+
+    for i in x:
+        color = "green" if closes[i] >= opens[i] else "red"
+        ax.vlines(i, lows[i], highs[i], color=color, linewidth=1)
+        bottom = min(opens[i], closes[i])
+        height = max(abs(closes[i] - opens[i]), 0.000001)
+        ax.bar(i, height, bottom=bottom, color=color, width=0.6)
+
+    def make_ema(values, period):
+        alpha = 2 / (period + 1)
+        result = values[0]
+        line = []
+        for value in values:
+            result = alpha * value + (1 - alpha) * result
+            line.append(result)
+        return line
+
+    ax.plot(x, make_ema(closes, 20), label="EMA20", linewidth=1.5)
+    ax.plot(x, make_ema(closes, 50), label="EMA50", linewidth=1.5)
+    ax.axhline(float(entry), linestyle="-", label=f"Entry: {entry}")
+    ax.axhline(float(stop_loss), linestyle="--", label=f"Stop Loss: {stop_loss}")
+    ax.axhline(float(take_profit), linestyle="--", label=f"Take Profit: {take_profit}")
+    ax.set_title(f"{symbol} | {timeframe} | {direction}")
+    ax.legend(loc="best")
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+
+    path = os.path.join(tempfile.gettempdir(), f"signal_{symbol.replace('/', '_')}_{timeframe}.png")
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+    return path
+
+def send_telegram_photo(message, image_path):
+    token = get_token()
+    with open(image_path, "rb") as photo:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            data={
+                "chat_id": CHAT_ID,
+                "caption": message[:1024],
+            },
+            files={"photo": photo},
+            timeout=30,
+        )
+    response.raise_for_status()
+    if not response.json().get("ok"):
+        raise RuntimeError("Telegram не принял изображение")
+
+def main():
+    seen_news = load_seen_news()
+    sent_signals = load_sent_signals()
+    symbols = get_available_symbols()
+    now = time.time()
+    last_scalp = 0
+    last_medium = 0
+    last_long = 0
+    last_news = 0
+
+    print("CryptoMarketClub запущен: только сигналы, автоматические сделки отключены.")
+    print("Скальпинг — каждую минуту; среднесрочный — каждые 15 минут; долгосрочный — каждый час.")
+    print("Новости — каждые 15 минут. Для остановки нажми Ctrl+C.")
+
+    while True:
+        now = time.time()
+        print("\n" + "=" * 55)
+        print("Проверка:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        # Refresh the contract list every 6 hours so new/removed markets are handled.
+        if not symbols or int(now) % (6 * 60 * 60) < 60:
+            try:
+                symbols = get_available_symbols()
+            except Exception as error:
+                print("Не удалось обновить список контрактов:", error)
+
+        if now - last_scalp >= SCALP_INTERVAL_SECONDS:
+            try:
+                scan_modes(symbols, [("СКАЛЬПИНГ", ["30m"])], sent_signals)
+            except Exception as error:
+                print("Ошибка скальпинг-сканера:", error)
+            last_scalp = time.time()
+
+        if now - last_medium >= MEDIUM_INTERVAL_SECONDS:
+            try:
+                scan_modes(symbols, [("СРЕДНЕСРОЧНЫЙ", ["15m"])], sent_signals)
+                scan_modes(symbols, [("ЧАСОВОЙ", ["1h"])], sent_signals)
+            except Exception as error:
+                print("Ошибка среднесрочного сканера:", error)
+            last_medium = time.time()
+
+        if now - last_long >= LONG_INTERVAL_SECONDS:
+            try:
+                scan_modes(symbols, [("ДНЕВНОЙ", ["1d"])], sent_signals)
+            except Exception as error:
+                print("Ошибка дневного сканера:", error)
+            last_long = time.time()
+
+        if now - last_news >= NEWS_INTERVAL_SECONDS:
+            try:
+                scan_news(seen_news)
+            except Exception as error:
+                print("Ошибка сканера новостей:", error)
+            last_news = time.time()
+
+        # A one-second loop keeps the minute schedule responsive without busy-waiting.
+        time.sleep(5)
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nБот остановлен пользователем.")
+    except Exception as error:
+        print("Критическая ошибка программы:", error)
