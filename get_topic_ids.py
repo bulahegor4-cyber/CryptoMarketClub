@@ -38,14 +38,14 @@ def main():
         text = message.get("text", "").strip()
         if not text.startswith("/topicid"):
             continue
+        label = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else "UNNAMED"
         chat = message.get("chat", {})
         thread_id = message.get("message_thread_id")
         if not thread_id:
-            print(f"Chat {chat.get('title') or chat.get('username')} ({chat.get('id')}): this is not a forum topic.")
+            print(f"{label}: chat_id={chat.get('id')} — not detected inside a forum topic.")
             continue
         print(
-            f"Topic: {message.get('forum_topic_created', {}).get('name', 'see topic title in Telegram')}"
-            f" | chat_id={chat.get('id')} | message_thread_id={thread_id}"
+            f"{label}: chat_id={chat.get('id')} | message_thread_id={thread_id}"
         )
         found += 1
 
