@@ -552,7 +552,10 @@ def classify_news(article):
 
     affected = []
     for ticker, terms in COIN_TERMS.items():
-        if any(term in text for term in terms):
+        if any(
+            re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", text)
+            for term in terms
+        ):
             affected.append(ticker)
     if not affected:
         affected = ["BTC", "ETH", "КРИПТОРЫНОК"]
