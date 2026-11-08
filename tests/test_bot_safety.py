@@ -74,6 +74,13 @@ class NewsClassificationTests(unittest.TestCase):
         self.assertIn("BTC", result["affected"])
         self.assertTrue(result["impact"].startswith("Высокое"))
 
+    def test_coin_tickers_are_not_matched_inside_unrelated_words(self):
+        result = classify_news({
+            "title": "Canada discusses ETF rules",
+            "description": "Whether consolidation continues remains unclear.",
+        })
+        self.assertEqual(result["affected"], ["BTC", "ETH", "КРИПТОРЫНОК"])
+
 
 class BingXKlineNormalizationTests(unittest.TestCase):
     def test_positional_bingx_kline_is_normalized(self):
