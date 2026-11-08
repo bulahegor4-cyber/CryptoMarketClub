@@ -3,6 +3,7 @@ import requests
 import time
 import os
 import hashlib
+import math
 import html
 import re
 import xml.etree.ElementTree as ET
@@ -200,6 +201,48 @@ def calculate_risk(entry, stop_loss, take_profit, direction):
     }
 
 
+def normalize_kline(candle):
+    """Normalize BingX v3 positional kline arrays and object-shaped candles."""
+    if isinstance(candle, dict):
+        open_time = candle.get("time", candle.get("openTime", candle.get("open_time")))
+        open_price = candle.get("open")
+        high_price = candle.get("high")
+        low_price = candle.get("low")
+        close_price = candle.get("close")
+        volume = candle.get("volume", candle.get("vol", 0))
+        close_time = candle.get("closeTime", candle.get("close_time"))
+    elif isinstance(candle, (list, tuple)) and len(candle) >= 7:
+        open_time, open_price, high_price, low_price, close_price, volume, close_time = candle[:7]
+    else:
+        raise ValueError("Unsupported BingX kline format")
+
+    try:
+        normalized = {
+            "time": int(float(open_time)),
+            "open": float(open_price),
+            "high": float(high_price),
+            "low": float(low_price),
+            "close": float(close_price),
+            "volume": float(volume or 0),
+            "closeTime": int(float(close_time)) if close_time is not None else None,
+        }
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Kline contains a non-numeric OHLCV field") from error
+
+    prices = (normalized["open"], normalized["high"], normalized["low"], normalized["close"])
+    if not all(math.isfinite(value) and value > 0 for value in prices):
+        raise ValueError("Kline contains an invalid price")
+    if not math.isfinite(normalized["volume"]) or normalized["volume"] < 0:
+        raise ValueError("Kline contains invalid volume")
+    if normalized["high"] < max(normalized["open"], normalized["close"]):
+        raise ValueError("Kline high is below open or close")
+    if normalized["low"] > min(normalized["open"], normalized["close"]):
+        raise ValueError("Kline low is above open or close")
+    if normalized["high"] < normalized["low"]:
+        raise ValueError("Kline high is below low")
+    return normalized
+
+
 def analyze(symbol, timeframe, mode_name):
     """Create an educational technical signal from the last closed candle."""
     response = requests.get(
@@ -214,9 +257,21 @@ def analyze(symbol, timeframe, mode_name):
         print(f"{symbol} {timeframe}: Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă„â€¦Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂĂ„Ä…Ă„ËťÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă„â€¦")
         return None
 
-    candles = sorted(data.get("data", []), key=lambda c: int(c["time"]))
+    raw_candles = data.get("data", [])
+    if not isinstance(raw_candles, list):
+        print(f"{symbol} {timeframe}: BingX returned an invalid kline collection")
+        return None
+
+    candles = []
+    for raw_candle in raw_candles:
+        try:
+            candles.append(normalize_kline(raw_candle))
+        except ValueError as error:
+            print(f"{symbol} {timeframe}: skipped invalid kline: {error}")
+
+    candles.sort(key=lambda candle: candle["time"])
     if len(candles) > 1:
-         candles = candles[:-1]  # Ä‚â€žĂ‚ÂĂ„Ä…Ă„â€žÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â»Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â·Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄ Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąÄľÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â°Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă„â€¦ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇĂ„Ä…Ă‚ÂÄ‚â€šĂ‚Â.
+        candles = candles[:-1]  # Ä‚â€žĂ‚ÂĂ„Ä…Ă„â€žÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â»Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â·Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄ Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąÄľÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â°Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă„â€¦ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇĂ„Ä…Ă‚ÂÄ‚â€šĂ‚Â.
     if len(candles) < 60:
         print(f"{symbol} {timeframe}: Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€žĂ„Äľ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€žĂ˘â‚¬Â¦")
         return None
