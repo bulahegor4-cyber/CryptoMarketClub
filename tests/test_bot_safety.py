@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import daily_risk
 from smc_module import analyze_smc
-from CryptoMarketClub_channel import calculate_risk, clean_news_text
+from CryptoMarketClub_channel import calculate_risk, clean_news_text, normalize_kline
 
 
 class DailyRiskTests(unittest.TestCase):
@@ -61,6 +61,35 @@ class NewsTextTests(unittest.TestCase):
 
     def test_html_is_removed_and_entities_are_decoded(self):
         self.assertEqual(clean_news_text("<p>BTC &amp; ETH</p>"), "BTC & ETH")
+
+
+class BingXKlineNormalizationTests(unittest.TestCase):
+    def test_positional_bingx_kline_is_normalized(self):
+        candle = [1700000000000, "100", "110", "95", "105", "2500", 1700001799999]
+        result = normalize_kline(candle)
+        self.assertEqual(result["time"], 1700000000000)
+        self.assertEqual(result["open"], 100.0)
+        self.assertEqual(result["high"], 110.0)
+        self.assertEqual(result["low"], 95.0)
+        self.assertEqual(result["close"], 105.0)
+        self.assertEqual(result["volume"], 2500.0)
+
+    def test_object_kline_remains_supported(self):
+        candle = {
+            "time": 1700000000000,
+            "open": "100",
+            "high": "110",
+            "low": "95",
+            "close": "105",
+            "volume": "2500",
+        }
+        result = normalize_kline(candle)
+        self.assertEqual(result["close"], 105.0)
+        self.assertEqual(result["volume"], 2500.0)
+
+    def test_malformed_kline_is_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize_kline([1700000000000, "100", "90", "95", "105", "2500", 1700001799999])
 
 
 class SMCAnalysisTests(unittest.TestCase):
