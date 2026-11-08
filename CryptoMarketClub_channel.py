@@ -396,50 +396,51 @@ def analyze(symbol, timeframe, mode_name):
     if risk and risk["risk_usdt"] > 0:
         risk_reward = risk["net_reward"] / risk["risk_usdt"]
 
-    direction_label = "đźź˘ LONG â€” ĐľĐ¶Đ¸Đ´Đ°Đ˝Đ¸Đµ Ń€ĐľŃŃ‚Đ°" if direction == "LONG" else "đź”´ SHORT â€” ĐľĐ¶Đ¸Đ´Đ°Đ˝Đ¸Đµ ŃĐ˝Đ¸Đ¶ĐµĐ˝Đ¸ŃŹ"
+    direction_label = "🟢 LONG — ожидание роста" if direction == "LONG" else "🔴 SHORT — ожидание снижения"
 
     # Simple structure summary based on recent price movement.
     recent_closes = [float(c["close"]) for c in candles[-10:]]
     if len(recent_closes) >= 6:
-        first_half = sum(recent_closes[:len(recent_closes)//2]) / (len(recent_closes)//2)
-        second_half = sum(recent_closes[len(recent_closes)//2:]) / (len(recent_closes) - len(recent_closes)//2)
+        midpoint = len(recent_closes) // 2
+        first_half = sum(recent_closes[:midpoint]) / midpoint
+        second_half = sum(recent_closes[midpoint:]) / (len(recent_closes) - midpoint)
         if second_half > first_half:
-            structure_text = "Đ¦ĐµĐ˝Đ° Đ˛ ĐżĐľŃĐ»ĐµĐ´Đ˝Đ¸Ń… ŃĐ˛ĐµŃ‡Đ°Ń… Đ´Đ˛Đ¸Đ¶ĐµŃ‚ŃŃŹ Đ˛Đ˛ĐµŃ€Ń…."
+            structure_text = "Средняя цена последних свечей повышается."
         elif second_half < first_half:
-            structure_text = "Đ¦ĐµĐ˝Đ° Đ˛ ĐżĐľŃĐ»ĐµĐ´Đ˝Đ¸Ń… ŃĐ˛ĐµŃ‡Đ°Ń… Đ´Đ˛Đ¸Đ¶ĐµŃ‚ŃŃŹ Đ˛Đ˝Đ¸Đ·."
+            structure_text = "Средняя цена последних свечей снижается."
         else:
-            structure_text = "Đ¦ĐµĐ˝Đ° Đ´Đ˛Đ¸Đ¶ĐµŃ‚ŃŃŹ Đ˛ Đ±ĐľĐşĐľĐ˛ĐľĐĽ Đ´Đ¸Đ°ĐżĐ°Đ·ĐľĐ˝Đµ."
+            structure_text = "Цена движется в боковом диапазоне."
     else:
-        structure_text = "ĐťĐµĐ´ĐľŃŃ‚Đ°Ń‚ĐľŃ‡Đ˝Đľ ŃĐ˛ĐµŃ‡ĐµĐą Đ´Đ»ŃŹ ĐľŃ†ĐµĐ˝ĐşĐ¸ Đ»ĐľĐşĐ°Đ»ŃŚĐ˝ĐľĐłĐľ Đ´Đ˛Đ¸Đ¶ĐµĐ˝Đ¸ŃŹ."
+        structure_text = "Недостаточно свечей для оценки локального движения."
 
-    rr_text = f"1:{risk_reward:.2f}" if risk_reward is not None else "Đ˝Đµ Ń€Đ°ŃŃŃ‡Đ¸Ń‚Đ°Đ˝Đľ"
+    rr_text = f"1:{risk_reward:.2f}" if risk_reward is not None else "не рассчитано"
 
     message = (
-        f"đź“Š CryptoMarketClub | {mode_name.upper()}\n\n"
+        f"📊 CryptoMarketClub | {mode_name.upper()}\n\n"
         f"{direction_label}\n"
-        f"ĐśĐľĐ˝ĐµŃ‚Đ°: {symbol}\n"
-        f"Đ˘Đ°ĐąĐĽŃ„Ń€ĐµĐąĐĽ: {timeframe}\n"
-        f"Đ¦ĐµĐ˝Đ° Đ˛Ń…ĐľĐ´Đ° (Entry): {price:.8g}\n"
-        f"ĐˇŃ‚ĐľĐż-Đ»ĐľŃŃ (SL): {stop_loss:.8g}\n"
-        f"Đ˘ĐµĐąĐş-ĐżŃ€ĐľŃ„Đ¸Ń‚ (TP): {take_profit:.8g}\n\n"
-        f"âš–ď¸Ź Đ Đ¸ŃĐş/ĐżŃ€Đ¸Đ±Ń‹Đ»ŃŚ: {rr_text}\n"
-        f"đź§­ ĐˇŃ‚Ń€ŃĐşŃ‚ŃŃ€Đ° Ń€Ń‹Đ˝ĐşĐ°: {structure_text}\n"
+        f"Монета: {symbol}\n"
+        f"Таймфрейм: {timeframe}\n"
+        f"Цена входа (Entry): {price:.8g}\n"
+        f"Стоп-лосс (SL): {stop_loss:.8g}\n"
+        f"Тейк-профит (TP): {take_profit:.8g}\n\n"
+        f"⚖️ Риск/прибыль: {rr_text}\n"
+        f"🧭 Структура рынка: {structure_text}\n"
     )
 
     if risk:
         message += (
-            "\nđź›ˇď¸Ź ĐŁĐźĐ ĐĐ’Đ›Đ•ĐťĐĐ• Đ ĐĐˇĐšĐžĐś (ĐľŃ†ĐµĐ˝ĐşĐ°)\n"
-            f"Đ‘Đ°Đ»Đ°Đ˝Ń Đ´Đ»ŃŹ Ń€Đ°ŃŃ‡Ń‘Ń‚Đ°: {RISK_BALANCE_USDT:.2f} USDT\n"
-            f"Đ Đ¸ŃĐş Đ˝Đ° ŃĐ´ĐµĐ»ĐşŃ: {RISK_PER_TRADE_PCT:.2f}% "
+            "\n🛡️ Управление риском (расчёт)\n"
+            f"Баланс для расчёта: {RISK_BALANCE_USDT:.2f} USDT\n"
+            f"Риск на сделку: {RISK_PER_TRADE_PCT:.2f}% "
             f"({risk['risk_usdt']:.2f} USDT)\n"
-            f"Đ Đ°ŃŃ‡Ń‘Ń‚Đ˝Ń‹Đą Ń€Đ°Đ·ĐĽĐµŃ€ ĐżĐľĐ·Đ¸Ń†Đ¸Đ¸: {risk['position_notional']:.2f} USDT\n"
-            f"Đ Đ°ŃŃ‡Ń‘Ń‚Đ˝Ń‹Đµ ĐşĐľĐĽĐ¸ŃŃĐ¸Đ¸: {risk['estimated_fees']:.2f} USDT\n"
-            f"ĐźĐľŃ‚ĐµĐ˝Ń†Đ¸Đ°Đ»ŃŚĐ˝Ń‹Đą Ń€ĐµĐ·ŃĐ»ŃŚŃ‚Đ°Ń‚ ĐżĐľŃĐ»Đµ ĐşĐľĐĽĐ¸ŃŃĐ¸Đą: {risk['net_reward']:.2f} USDT\n"
+            f"Расчётный размер позиции: {risk['position_notional']:.2f} USDT\n"
+            f"Расчётные комиссии: {risk['estimated_fees']:.2f} USDT\n"
+            f"Потенциальный результат после комиссий: {risk['net_reward']:.2f} USDT\n"
         )
 
     message += (
-        "\nâš ď¸Ź Đ­Ń‚Đľ Đ°Đ˝Đ°Đ»Đ¸Ń‚Đ¸Ń‡ĐµŃĐşĐ¸Đą ŃĐ¸ĐłĐ˝Đ°Đ», Đ° Đ˝Đµ ĐłĐ°Ń€Đ°Đ˝Ń‚Đ¸ŃŹ Ń€ĐµĐ·ŃĐ»ŃŚŃ‚Đ°Ń‚Đ°. "
-        "ĐźŃ€ĐľĐ˛ĐµŃ€ŃŚŃ‚Đµ ĐłŃ€Đ°Ń„Đ¸Đş Đ¸ Ń€Đ¸ŃĐş ĐżĐµŃ€ĐµĐ´ ĐżŃ€Đ¸Đ˝ŃŹŃ‚Đ¸ĐµĐĽ Ń€ĐµŃĐµĐ˝Đ¸ŃŹ."
+        "\n⚠️ Это аналитический сигнал, а не гарантия результата. "
+        "Проверьте график, ликвидность и риск перед принятием решения."
     )
 
     return {"id": signal_id, "message": message, "symbol": symbol, "timeframe": timeframe, "candles": candles, "ema20": ema20, "ema50": ema50, "entry": price, "stop_loss": stop_loss, "take_profit": take_profit, "direction": direction}
