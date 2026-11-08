@@ -1,4 +1,3 @@
-import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,7 +57,7 @@ class RiskSizingTests(unittest.TestCase):
 
 class NewsTextTests(unittest.TestCase):
     def test_whitespace_is_collapsed(self):
-        self.assertEqual(clean_news_text("hello\\n\\t  world"), "hello world")
+        self.assertEqual(clean_news_text("hello\n\t  world"), "hello world")
 
     def test_html_is_removed_and_entities_are_decoded(self):
         self.assertEqual(clean_news_text("<p>BTC &amp; ETH</p>"), "BTC & ETH")
