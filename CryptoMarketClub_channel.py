@@ -3,6 +3,7 @@ import requests
 import time
 import os
 import hashlib
+import math
 import html
 import re
 import xml.etree.ElementTree as ET
@@ -200,6 +201,48 @@ def calculate_risk(entry, stop_loss, take_profit, direction):
     }
 
 
+def normalize_kline(candle):
+    """Normalize BingX v3 positional kline arrays and object-shaped candles."""
+    if isinstance(candle, dict):
+        open_time = candle.get("time", candle.get("openTime", candle.get("open_time")))
+        open_price = candle.get("open")
+        high_price = candle.get("high")
+        low_price = candle.get("low")
+        close_price = candle.get("close")
+        volume = candle.get("volume", candle.get("vol", 0))
+        close_time = candle.get("closeTime", candle.get("close_time"))
+    elif isinstance(candle, (list, tuple)) and len(candle) >= 7:
+        open_time, open_price, high_price, low_price, close_price, volume, close_time = candle[:7]
+    else:
+        raise ValueError("Unsupported BingX kline format")
+
+    try:
+        normalized = {
+            "time": int(float(open_time)),
+            "open": float(open_price),
+            "high": float(high_price),
+            "low": float(low_price),
+            "close": float(close_price),
+            "volume": float(volume or 0),
+            "closeTime": int(float(close_time)) if close_time is not None else None,
+        }
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Kline contains a non-numeric OHLCV field") from error
+
+    prices = (normalized["open"], normalized["high"], normalized["low"], normalized["close"])
+    if not all(math.isfinite(value) and value > 0 for value in prices):
+        raise ValueError("Kline contains an invalid price")
+    if not math.isfinite(normalized["volume"]) or normalized["volume"] < 0:
+        raise ValueError("Kline contains invalid volume")
+    if normalized["high"] < max(normalized["open"], normalized["close"]):
+        raise ValueError("Kline high is below open or close")
+    if normalized["low"] > min(normalized["open"], normalized["close"]):
+        raise ValueError("Kline low is above open or close")
+    if normalized["high"] < normalized["low"]:
+        raise ValueError("Kline high is below low")
+    return normalized
+
+
 def analyze(symbol, timeframe, mode_name):
     """Create an educational technical signal from the last closed candle."""
     response = requests.get(
@@ -214,9 +257,21 @@ def analyze(symbol, timeframe, mode_name):
         print(f"{symbol} {timeframe}: Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă„â€¦Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂĂ„Ä…Ă„ËťÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă„â€¦")
         return None
 
-    candles = sorted(data.get("data", []), key=lambda c: int(c["time"]))
+    raw_candles = data.get("data", [])
+    if not isinstance(raw_candles, list):
+        print(f"{symbol} {timeframe}: BingX returned an invalid kline collection")
+        return None
+
+    candles = []
+    for raw_candle in raw_candles:
+        try:
+            candles.append(normalize_kline(raw_candle))
+        except ValueError as error:
+            print(f"{symbol} {timeframe}: skipped invalid kline: {error}")
+
+    candles.sort(key=lambda candle: candle["time"])
     if len(candles) > 1:
-         candles = candles[:-1]  # Ä‚â€žĂ‚ÂĂ„Ä…Ă„â€žÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â»Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â·Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄ Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąÄľÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â°Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă„â€¦ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇĂ„Ä…Ă‚ÂÄ‚â€šĂ‚Â.
+        candles = candles[:-1]  # Ä‚â€žĂ‚ÂĂ„Ä…Ă„â€žÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Âµ Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â»Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â·Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄ Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąÄľÄ‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ä‚â€žĂ‚ÂÄ‚â€žĂ‹ĹĄÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â¸Ă„Ä…Ă‚ÂÄ‚ËĂ˘â‚¬ĹˇĂ‚Â¬Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â°Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă‹ĹĄĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂĂ„Ä…Ă„â€¦ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇĂ„Ä…Ă‚ÂÄ‚â€šĂ‚Â.
     if len(candles) < 60:
         print(f"{symbol} {timeframe}: Ä‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€šĂ‚Â´Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚â€šĂ‚ÂĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ä‚â€žĂ‚ÂÄ‚â€šĂ‚Â°Ă„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬ÄąË‡Ä‚â€žĂ‚ÂÄ‚â€žĂ„ÄľĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇÄ‚â€žĂ‚ÂÄ‚â€ąÄąÄ„Ä‚â€žĂ‚ÂÄ‚â€žĂ„Äľ Ă„Ä…Ă‚ÂÄ‚â€šĂ‚ÂÄ‚â€žĂ‚ÂÄ‚â€ąĂ˘â‚¬ĹźÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµĂ„Ä…Ă‚ÂÄ‚ËĂ˘â€šÂ¬Ă‹â€ˇÄ‚â€žĂ‚ÂÄ‚â€šĂ‚ÂµÄ‚â€žĂ‚ÂÄ‚â€žĂ˘â‚¬Â¦")
         return None
@@ -341,50 +396,51 @@ def analyze(symbol, timeframe, mode_name):
     if risk and risk["risk_usdt"] > 0:
         risk_reward = risk["net_reward"] / risk["risk_usdt"]
 
-    direction_label = "đźź˘ LONG â€” ĐľĐ¶Đ¸Đ´Đ°Đ˝Đ¸Đµ Ń€ĐľŃŃ‚Đ°" if direction == "LONG" else "đź”´ SHORT â€” ĐľĐ¶Đ¸Đ´Đ°Đ˝Đ¸Đµ ŃĐ˝Đ¸Đ¶ĐµĐ˝Đ¸ŃŹ"
+    direction_label = "🟢 LONG — ожидание роста" if direction == "LONG" else "🔴 SHORT — ожидание снижения"
 
     # Simple structure summary based on recent price movement.
     recent_closes = [float(c["close"]) for c in candles[-10:]]
     if len(recent_closes) >= 6:
-        first_half = sum(recent_closes[:len(recent_closes)//2]) / (len(recent_closes)//2)
-        second_half = sum(recent_closes[len(recent_closes)//2:]) / (len(recent_closes) - len(recent_closes)//2)
+        midpoint = len(recent_closes) // 2
+        first_half = sum(recent_closes[:midpoint]) / midpoint
+        second_half = sum(recent_closes[midpoint:]) / (len(recent_closes) - midpoint)
         if second_half > first_half:
-            structure_text = "Đ¦ĐµĐ˝Đ° Đ˛ ĐżĐľŃĐ»ĐµĐ´Đ˝Đ¸Ń… ŃĐ˛ĐµŃ‡Đ°Ń… Đ´Đ˛Đ¸Đ¶ĐµŃ‚ŃŃŹ Đ˛Đ˛ĐµŃ€Ń…."
+            structure_text = "Средняя цена последних свечей повышается."
         elif second_half < first_half:
-            structure_text = "Đ¦ĐµĐ˝Đ° Đ˛ ĐżĐľŃĐ»ĐµĐ´Đ˝Đ¸Ń… ŃĐ˛ĐµŃ‡Đ°Ń… Đ´Đ˛Đ¸Đ¶ĐµŃ‚ŃŃŹ Đ˛Đ˝Đ¸Đ·."
+            structure_text = "Средняя цена последних свечей снижается."
         else:
-            structure_text = "Đ¦ĐµĐ˝Đ° Đ´Đ˛Đ¸Đ¶ĐµŃ‚ŃŃŹ Đ˛ Đ±ĐľĐşĐľĐ˛ĐľĐĽ Đ´Đ¸Đ°ĐżĐ°Đ·ĐľĐ˝Đµ."
+            structure_text = "Цена движется в боковом диапазоне."
     else:
-        structure_text = "ĐťĐµĐ´ĐľŃŃ‚Đ°Ń‚ĐľŃ‡Đ˝Đľ ŃĐ˛ĐµŃ‡ĐµĐą Đ´Đ»ŃŹ ĐľŃ†ĐµĐ˝ĐşĐ¸ Đ»ĐľĐşĐ°Đ»ŃŚĐ˝ĐľĐłĐľ Đ´Đ˛Đ¸Đ¶ĐµĐ˝Đ¸ŃŹ."
+        structure_text = "Недостаточно свечей для оценки локального движения."
 
-    rr_text = f"1:{risk_reward:.2f}" if risk_reward is not None else "Đ˝Đµ Ń€Đ°ŃŃŃ‡Đ¸Ń‚Đ°Đ˝Đľ"
+    rr_text = f"1:{risk_reward:.2f}" if risk_reward is not None else "не рассчитано"
 
     message = (
-        f"đź“Š CryptoMarketClub | {mode_name.upper()}\n\n"
+        f"📊 CryptoMarketClub | {mode_name.upper()}\n\n"
         f"{direction_label}\n"
-        f"ĐśĐľĐ˝ĐµŃ‚Đ°: {symbol}\n"
-        f"Đ˘Đ°ĐąĐĽŃ„Ń€ĐµĐąĐĽ: {timeframe}\n"
-        f"Đ¦ĐµĐ˝Đ° Đ˛Ń…ĐľĐ´Đ° (Entry): {price:.8g}\n"
-        f"ĐˇŃ‚ĐľĐż-Đ»ĐľŃŃ (SL): {stop_loss:.8g}\n"
-        f"Đ˘ĐµĐąĐş-ĐżŃ€ĐľŃ„Đ¸Ń‚ (TP): {take_profit:.8g}\n\n"
-        f"âš–ď¸Ź Đ Đ¸ŃĐş/ĐżŃ€Đ¸Đ±Ń‹Đ»ŃŚ: {rr_text}\n"
-        f"đź§­ ĐˇŃ‚Ń€ŃĐşŃ‚ŃŃ€Đ° Ń€Ń‹Đ˝ĐşĐ°: {structure_text}\n"
+        f"Монета: {symbol}\n"
+        f"Таймфрейм: {timeframe}\n"
+        f"Цена входа (Entry): {price:.8g}\n"
+        f"Стоп-лосс (SL): {stop_loss:.8g}\n"
+        f"Тейк-профит (TP): {take_profit:.8g}\n\n"
+        f"⚖️ Риск/прибыль: {rr_text}\n"
+        f"🧭 Структура рынка: {structure_text}\n"
     )
 
     if risk:
         message += (
-            "\nđź›ˇď¸Ź ĐŁĐźĐ ĐĐ’Đ›Đ•ĐťĐĐ• Đ ĐĐˇĐšĐžĐś (ĐľŃ†ĐµĐ˝ĐşĐ°)\n"
-            f"Đ‘Đ°Đ»Đ°Đ˝Ń Đ´Đ»ŃŹ Ń€Đ°ŃŃ‡Ń‘Ń‚Đ°: {RISK_BALANCE_USDT:.2f} USDT\n"
-            f"Đ Đ¸ŃĐş Đ˝Đ° ŃĐ´ĐµĐ»ĐşŃ: {RISK_PER_TRADE_PCT:.2f}% "
+            "\n🛡️ Управление риском (расчёт)\n"
+            f"Баланс для расчёта: {RISK_BALANCE_USDT:.2f} USDT\n"
+            f"Риск на сделку: {RISK_PER_TRADE_PCT:.2f}% "
             f"({risk['risk_usdt']:.2f} USDT)\n"
-            f"Đ Đ°ŃŃ‡Ń‘Ń‚Đ˝Ń‹Đą Ń€Đ°Đ·ĐĽĐµŃ€ ĐżĐľĐ·Đ¸Ń†Đ¸Đ¸: {risk['position_notional']:.2f} USDT\n"
-            f"Đ Đ°ŃŃ‡Ń‘Ń‚Đ˝Ń‹Đµ ĐşĐľĐĽĐ¸ŃŃĐ¸Đ¸: {risk['estimated_fees']:.2f} USDT\n"
-            f"ĐźĐľŃ‚ĐµĐ˝Ń†Đ¸Đ°Đ»ŃŚĐ˝Ń‹Đą Ń€ĐµĐ·ŃĐ»ŃŚŃ‚Đ°Ń‚ ĐżĐľŃĐ»Đµ ĐşĐľĐĽĐ¸ŃŃĐ¸Đą: {risk['net_reward']:.2f} USDT\n"
+            f"Расчётный размер позиции: {risk['position_notional']:.2f} USDT\n"
+            f"Расчётные комиссии: {risk['estimated_fees']:.2f} USDT\n"
+            f"Потенциальный результат после комиссий: {risk['net_reward']:.2f} USDT\n"
         )
 
     message += (
-        "\nâš ď¸Ź Đ­Ń‚Đľ Đ°Đ˝Đ°Đ»Đ¸Ń‚Đ¸Ń‡ĐµŃĐşĐ¸Đą ŃĐ¸ĐłĐ˝Đ°Đ», Đ° Đ˝Đµ ĐłĐ°Ń€Đ°Đ˝Ń‚Đ¸ŃŹ Ń€ĐµĐ·ŃĐ»ŃŚŃ‚Đ°Ń‚Đ°. "
-        "ĐźŃ€ĐľĐ˛ĐµŃ€ŃŚŃ‚Đµ ĐłŃ€Đ°Ń„Đ¸Đş Đ¸ Ń€Đ¸ŃĐş ĐżĐµŃ€ĐµĐ´ ĐżŃ€Đ¸Đ˝ŃŹŃ‚Đ¸ĐµĐĽ Ń€ĐµŃĐµĐ˝Đ¸ŃŹ."
+        "\n⚠️ Это аналитический сигнал, а не гарантия результата. "
+        "Проверьте график, ликвидность и риск перед принятием решения."
     )
 
     return {"id": signal_id, "message": message, "symbol": symbol, "timeframe": timeframe, "candles": candles, "ema20": ema20, "ema50": ema50, "entry": price, "stop_loss": stop_loss, "take_profit": take_profit, "direction": direction}
@@ -485,21 +541,24 @@ def classify_news(article):
     negative = sum(1 for term in NEGATIVE_TERMS if term in text)
 
     if positive > negative:
-        sentiment = "ĐźĐľĐ·Đ¸Ń‚Đ¸Đ˛Đ˝ĐľĐµ"
-        effect = "Đ’ĐľĐ·ĐĽĐľĐ¶Đ˝Đ°ŃŹ ĐżĐľĐ´Đ´ĐµŃ€Đ¶ĐşĐ° Ń†ĐµĐ˝Ń‹"
+        sentiment = "Позитивное"
+        effect = "Возможная поддержка цены"
     elif negative > positive:
-        sentiment = "ĐťĐµĐłĐ°Ń‚Đ¸Đ˛Đ˝ĐľĐµ"
-        effect = "Đ’ĐľĐ·ĐĽĐľĐ¶Đ˝ĐľĐµ Đ´Đ°Đ˛Đ»ĐµĐ˝Đ¸Đµ Đ˝Đ° Ń†ĐµĐ˝Ń"
+        sentiment = "Негативное"
+        effect = "Возможное давление на цену"
     else:
-        sentiment = "ĐťĐµĐąŃ‚Ń€Đ°Đ»ŃŚĐ˝ĐľĐµ / ŃĐĽĐµŃĐ°Đ˝Đ˝ĐľĐµ"
-        effect = "ĐťĐ°ĐżŃ€Đ°Đ˛Đ»ĐµĐ˝Đ¸Đµ Đ˛Đ»Đ¸ŃŹĐ˝Đ¸ŃŹ Đ˝ĐµŃŹŃĐ˝Đľ"
+        sentiment = "Нейтральное / смешанное"
+        effect = "Направление влияния неясно"
 
     affected = []
     for ticker, terms in COIN_TERMS.items():
-        if any(term in text for term in terms):
+        if any(
+            re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", text)
+            for term in terms
+        ):
             affected.append(ticker)
     if not affected:
-        affected = ["BTC", "ETH", "ĐşŃ€Đ¸ĐżŃ‚ĐľŃ€Ń‹Đ˝ĐľĐş"]
+        affected = ["BTC", "ETH", "КРИПТОРЫНОК"]
 
     if len(matched_impact) >= 2 or any(
         term in text for term in [
@@ -507,9 +566,9 @@ def classify_news(article):
             "interest rate", "etf", "ban"
         ]
     ):
-        impact = "Đ’Ń‹ŃĐľĐşĐľĐµ (ĐżŃ€ĐµĐ´Đ˛Đ°Ń€Đ¸Ń‚ĐµĐ»ŃŚĐ˝Đ°ŃŹ ĐľŃ†ĐµĐ˝ĐşĐ°)"
+        impact = "Высокое (предварительная оценка)"
     else:
-        impact = "ĐˇŃ€ĐµĐ´Đ˝ĐµĐµ (ĐżŃ€ĐµĐ´Đ˛Đ°Ń€Đ¸Ń‚ĐµĐ»ŃŚĐ˝Đ°ŃŹ ĐľŃ†ĐµĐ˝ĐşĐ°)"
+        impact = "Среднее (предварительная оценка)"
 
     return {
         "sentiment": sentiment,
@@ -518,11 +577,10 @@ def classify_news(article):
         "impact": impact,
     }
 
-
 def clean_news_text(text):
     text = re.sub(r"<[^>]*>", " ", text)
     text = html.unescape(text)
-    return re.sub(r"\\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def scan_news(seen):

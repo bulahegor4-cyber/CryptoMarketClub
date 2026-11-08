@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import date, datetime
 from pathlib import Path
 
@@ -18,7 +19,13 @@ def load_trades():
 
 
 def record_closed_trade(net_pnl_usdt, symbol="", note=""):
-    pnl = float(net_pnl_usdt)
+    try:
+        pnl = float(net_pnl_usdt)
+    except (TypeError, ValueError) as error:
+        raise ValueError("net_pnl_usdt must be a finite number") from error
+    if not math.isfinite(pnl):
+        raise ValueError("net_pnl_usdt must be a finite number")
+
     trades = load_trades()
     trades.append({
         "date": date.today().isoformat(),
