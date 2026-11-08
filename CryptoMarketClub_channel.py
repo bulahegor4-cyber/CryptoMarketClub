@@ -522,7 +522,7 @@ def classify_news(article):
 def clean_news_text(text):
     text = re.sub(r"<[^>]*>", " ", text)
     text = html.unescape(text)
-    return re.sub(r"\\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def scan_news(seen):
