@@ -541,21 +541,21 @@ def classify_news(article):
     negative = sum(1 for term in NEGATIVE_TERMS if term in text)
 
     if positive > negative:
-        sentiment = "ĐźĐľĐ·Đ¸Ń‚Đ¸Đ˛Đ˝ĐľĐµ"
-        effect = "Đ’ĐľĐ·ĐĽĐľĐ¶Đ˝Đ°ŃŹ ĐżĐľĐ´Đ´ĐµŃ€Đ¶ĐşĐ° Ń†ĐµĐ˝Ń‹"
+        sentiment = "Позитивное"
+        effect = "Возможная поддержка цены"
     elif negative > positive:
-        sentiment = "ĐťĐµĐłĐ°Ń‚Đ¸Đ˛Đ˝ĐľĐµ"
-        effect = "Đ’ĐľĐ·ĐĽĐľĐ¶Đ˝ĐľĐµ Đ´Đ°Đ˛Đ»ĐµĐ˝Đ¸Đµ Đ˝Đ° Ń†ĐµĐ˝Ń"
+        sentiment = "Негативное"
+        effect = "Возможное давление на цену"
     else:
-        sentiment = "ĐťĐµĐąŃ‚Ń€Đ°Đ»ŃŚĐ˝ĐľĐµ / ŃĐĽĐµŃĐ°Đ˝Đ˝ĐľĐµ"
-        effect = "ĐťĐ°ĐżŃ€Đ°Đ˛Đ»ĐµĐ˝Đ¸Đµ Đ˛Đ»Đ¸ŃŹĐ˝Đ¸ŃŹ Đ˝ĐµŃŹŃĐ˝Đľ"
+        sentiment = "Нейтральное / смешанное"
+        effect = "Направление влияния неясно"
 
     affected = []
     for ticker, terms in COIN_TERMS.items():
         if any(term in text for term in terms):
             affected.append(ticker)
     if not affected:
-        affected = ["BTC", "ETH", "ĐşŃ€Đ¸ĐżŃ‚ĐľŃ€Ń‹Đ˝ĐľĐş"]
+        affected = ["BTC", "ETH", "КРИПТОРЫНОК"]
 
     if len(matched_impact) >= 2 or any(
         term in text for term in [
@@ -563,9 +563,9 @@ def classify_news(article):
             "interest rate", "etf", "ban"
         ]
     ):
-        impact = "Đ’Ń‹ŃĐľĐşĐľĐµ (ĐżŃ€ĐµĐ´Đ˛Đ°Ń€Đ¸Ń‚ĐµĐ»ŃŚĐ˝Đ°ŃŹ ĐľŃ†ĐµĐ˝ĐşĐ°)"
+        impact = "Высокое (предварительная оценка)"
     else:
-        impact = "ĐˇŃ€ĐµĐ´Đ˝ĐµĐµ (ĐżŃ€ĐµĐ´Đ˛Đ°Ń€Đ¸Ń‚ĐµĐ»ŃŚĐ˝Đ°ŃŹ ĐľŃ†ĐµĐ˝ĐşĐ°)"
+        impact = "Среднее (предварительная оценка)"
 
     return {
         "sentiment": sentiment,
@@ -573,7 +573,6 @@ def classify_news(article):
         "affected": affected,
         "impact": impact,
     }
-
 
 def clean_news_text(text):
     text = re.sub(r"<[^>]*>", " ", text)
