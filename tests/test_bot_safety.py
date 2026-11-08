@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import daily_risk
 from smc_module import analyze_smc
-from CryptoMarketClub_channel import calculate_risk, clean_news_text, normalize_kline
+from CryptoMarketClub_channel import calculate_risk, clean_news_text, normalize_kline, classify_news
 
 
 class DailyRiskTests(unittest.TestCase):
@@ -61,6 +61,18 @@ class NewsTextTests(unittest.TestCase):
 
     def test_html_is_removed_and_entities_are_decoded(self):
         self.assertEqual(clean_news_text("<p>BTC &amp; ETH</p>"), "BTC & ETH")
+
+
+class NewsClassificationTests(unittest.TestCase):
+    def test_positive_bitcoin_etf_news_is_classified_in_russian(self):
+        result = classify_news({
+            "title": "Bitcoin ETF approved with record inflows",
+            "description": "Institutional adoption grows.",
+        })
+        self.assertEqual(result["sentiment"], "Позитивное")
+        self.assertEqual(result["effect"], "Возможная поддержка цены")
+        self.assertIn("BTC", result["affected"])
+        self.assertTrue(result["impact"].startswith("Высокое"))
 
 
 class BingXKlineNormalizationTests(unittest.TestCase):
