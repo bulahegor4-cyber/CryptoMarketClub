@@ -118,8 +118,11 @@ def news_topic(article):
 def send_telegram(message, thread_id=None, topic=None):
     if thread_id is None and topic:
         thread_id = get_topic_id(topic)
-        if thread_id is None and topic != "news":
-            thread_id = get_topic_id("news")
+        if thread_id is None:
+            raise RuntimeError(
+                f"Telegram topic '{topic}' is not configured. "
+                "Message was not sent to the group default topic."
+            )
     token = get_token()
     payload = {
         "chat_id": CHAT_ID,
@@ -688,8 +691,13 @@ def scan_modes(symbols, modes, sent_signals):
         return
     sent_count = 0
     for mode_name, timeframes in modes:
-        # Signals are routed to the configured Telegram forum topic.
+        # Never publish signals outside the configured Signals forum topic.
         topic_id = get_topic_id("signals")
+        if topic_id is None:
+            raise RuntimeError(
+                "TELEGRAM_TOPIC_SIGNALS_ID is missing or invalid in .env; "
+                "signal publishing is stopped to prevent posting outside the Signals topic."
+            )
         print(f"\n--- {mode_name}: {', '.join(timeframes)} ---")
         for symbol in symbols:
             for timeframe in timeframes:
@@ -875,6 +883,11 @@ def create_signal_chart(symbol, timeframe, candles, ema20, ema50, entry, stop_lo
 
 
 def send_telegram_photo(message, image_path, thread_id=None):
+    if thread_id is None:
+        raise RuntimeError(
+            "Telegram topic ID is missing; refusing to post the photo "
+            "to the group default topic."
+        )
     token = get_token()
     with open(image_path, "rb") as photo:
         data = {
